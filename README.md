@@ -88,8 +88,3 @@ python src/predict_universal.py --model models/catboost_model.cbm --scaler model
 MIT License
 
 ---
-
-**Disclaimer**: Research/educational project. Not for clinical decision-making.
-```
-
-***
