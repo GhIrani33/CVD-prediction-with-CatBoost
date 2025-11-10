@@ -31,8 +31,6 @@ Machine learning model for CVD prediction using CatBoost. Optimized across 1,004
 ### Feature Importance
 ![Feature Importance](figures/feature_importance.png)
 
-### Model Performance
-![Metrics Summary](figures/metrics_summary.png)
 
 ## Quick Start
 
