@@ -1,0 +1,237 @@
+====================================================================================================
+EDA & DATA QUALITY REPORT – KAGGLE CARDIOVASCULAR DISEASE DATASET
+====================================================================================================
+File: D:\Project\Heart diseae\dataset\1\cardio_train.csv
+Source: Kaggle – Sulianova Cardiovascular Disease dataset
+
+1) DATASET STRUCTURE
+- Shape: 70000 rows × 13 columns
+- Columns: id, age, gender, height, weight, ap_hi, ap_lo, cholesterol, gluc, smoke, alco, active, cardio
+
+DataFrame.info():
+<class 'pandas.core.frame.DataFrame'>
+RangeIndex: 70000 entries, 0 to 69999
+Data columns (total 13 columns):
+ #   Column       Non-Null Count  Dtype  
+---  ------       --------------  -----  
+ 0   id           70000 non-null  int64  
+ 1   age          70000 non-null  int64  
+ 2   gender       70000 non-null  int64  
+ 3   height       70000 non-null  int64  
+ 4   weight       70000 non-null  float64
+ 5   ap_hi        70000 non-null  int64  
+ 6   ap_lo        70000 non-null  int64  
+ 7   cholesterol  70000 non-null  int64  
+ 8   gluc         70000 non-null  int64  
+ 9   smoke        70000 non-null  int64  
+ 10  alco         70000 non-null  int64  
+ 11  active       70000 non-null  int64  
+ 12  cardio       70000 non-null  int64  
+dtypes: float64(1), int64(12)
+memory usage: 6.9 MB
+
+
+2) MISSING & HIDDEN MISSING VALUES
+Explicit missing counts:
+id             0
+age            0
+gender         0
+height         0
+weight         0
+ap_hi          0
+ap_lo          0
+cholesterol    0
+gluc           0
+smoke          0
+alco           0
+active         0
+cardio         0
+Hidden missing-like tokens in object columns:
+[]
+
+3) DUPLICATES
+- Total rows: 70000
+- Exact duplicate rows: 0
+
+4) CLINICAL PLAUSIBILITY & INCONSISTENCY CHECKS
+Plausibility issues:
+[
+  [
+    "age_out_of_range_count",
+    0
+  ],
+  [
+    "height_out_of_range_count",
+    53
+  ],
+  [
+    "weight_out_of_range_count",
+    7
+  ],
+  [
+    "ap_order_ap_hi_lt_ap_lo",
+    1234
+  ],
+  [
+    "ap_hi_extreme",
+    229
+  ],
+  [
+    "ap_lo_extreme",
+    1034
+  ],
+  [
+    "gender_invalid_codes",
+    0
+  ],
+  [
+    "cholesterol_invalid_codes",
+    0
+  ],
+  [
+    "gluc_invalid_codes",
+    0
+  ],
+  [
+    "smoke_invalid_codes",
+    0
+  ],
+  [
+    "alco_invalid_codes",
+    0
+  ],
+  [
+    "active_invalid_codes",
+    0
+  ],
+  [
+    "cardio_invalid_codes",
+    0
+  ]
+]
+Inconsistency maps:
+{
+  "ap_hi_less_than_ap_lo": 1234,
+  "pulse_pressure_negative": 1236,
+  "wide_pulse_pressure": 285
+}
+
+5) FEATURE ENGINEERING CANDIDATES
+BMI summary (computed):
+count    70000.000000
+mean        27.556513
+std          6.091511
+min          3.471784
+25%         23.875115
+50%         26.374068
+75%         30.222222
+max        298.666667
+Suggested engineered features:
+- BMI and BMI categories (WHO cutoffs)
+- Age in years and age bands (e.g., 18–29, 30–39, ...)
+- BP categories: normal/elevated/stage1/stage2 based on ap_hi/ap_lo
+- Pulse pressure (ap_hi - ap_lo)
+- Interaction: age×BP, BMI×gluc, gender×cholesterol
+
+6) UNIVARIATE STATISTICS (NUMERIC)
+               count          mean           std      min       25%      50%       75%      max       skew     kurtosis
+id           70000.0  49972.419900  28851.302323      0.0  25006.75  50001.5  74889.25  99999.0  -0.001278    -1.198374
+age          70000.0  19468.865814   2467.251667  10798.0  17664.00  19703.0  21327.00  23713.0  -0.307055    -0.823447
+gender       70000.0      1.349571      0.476838      1.0      1.00      1.0      2.00      2.0   0.630960    -1.601935
+height       70000.0    164.359229      8.210126     55.0    159.00    165.0    170.00    250.0  -0.642187     7.943653
+weight       70000.0     74.205690     14.395757     10.0     65.00     72.0     82.00    200.0   1.012070     2.586825
+ap_hi        70000.0    128.817286    154.011419   -150.0    120.00    120.0    140.00  16020.0  85.296214  7580.074738
+ap_lo        70000.0     96.630414    188.472530    -70.0     80.00     80.0     90.00  11000.0  32.114083  1425.914585
+cholesterol  70000.0      1.366871      0.680250      1.0      1.00      1.0      2.00      3.0   1.587123     0.993901
+gluc         70000.0      1.226457      0.572270      1.0      1.00      1.0      1.00      3.0   2.397462     4.294377
+smoke        70000.0      0.088129      0.283484      0.0      0.00      0.0      0.00      1.0   2.905867     6.444250
+alco         70000.0      0.053771      0.225568      0.0      0.00      0.0      0.00      1.0   3.956607    13.655125
+active       70000.0      0.803729      0.397179      0.0      1.00      1.0      1.00      1.0  -1.529473     0.339296
+cardio       70000.0      0.499700      0.500003      0.0      0.00      0.0      1.00      1.0   0.001200    -2.000056
+
+7) CATEGORICAL SUMMARIES
+-- gender --
+gender
+1    45530
+2    24470
+-- cholesterol --
+cholesterol
+1    52385
+2     9549
+3     8066
+-- gluc --
+gluc
+1    59479
+2     5190
+3     5331
+-- smoke --
+smoke
+0    63831
+1     6169
+-- alco --
+alco
+0    66236
+1     3764
+-- active --
+active
+0    13739
+1    56261
+-- cardio --
+cardio
+0    35021
+1    34979
+
+8) CORRELATION MATRIX (NUMERIC)
+                   id       age    gender    height    weight     ap_hi     ap_lo  cholesterol      gluc     smoke      alco    active    cardio
+id           1.000000  0.003457  0.003502 -0.003038 -0.001830  0.003356 -0.002529     0.006106  0.002467 -0.003699  0.001210  0.003755  0.003799
+age          0.003457  1.000000 -0.022811 -0.081515  0.053684  0.020764  0.017647     0.154424  0.098703 -0.047633 -0.029723 -0.009927  0.238159
+gender       0.003502 -0.022811  1.000000  0.499033  0.155406  0.006005  0.015254    -0.035821 -0.020491  0.338135  0.170966  0.005866  0.008109
+height      -0.003038 -0.081515  0.499033  1.000000  0.290968  0.005488  0.006150    -0.050226 -0.018595  0.187989  0.094419 -0.006570 -0.010821
+weight      -0.001830  0.053684  0.155406  0.290968  1.000000  0.030702  0.043710     0.141768  0.106857  0.067780  0.067113 -0.016867  0.181660
+ap_hi        0.003356  0.020764  0.006005  0.005488  0.030702  1.000000  0.016086     0.023778  0.011841 -0.000922  0.001408 -0.000033  0.054475
+ap_lo       -0.002529  0.017647  0.015254  0.006150  0.043710  0.016086  1.000000     0.024019  0.010806  0.005186  0.010601  0.004780  0.065719
+cholesterol  0.006106  0.154424 -0.035821 -0.050226  0.141768  0.023778  0.024019     1.000000  0.451578  0.010354  0.035760  0.009911  0.221147
+gluc         0.002467  0.098703 -0.020491 -0.018595  0.106857  0.011841  0.010806     0.451578  1.000000 -0.004756  0.011246 -0.006770  0.089307
+smoke       -0.003699 -0.047633  0.338135  0.187989  0.067780 -0.000922  0.005186     0.010354 -0.004756  1.000000  0.340094  0.025858 -0.015486
+alco         0.001210 -0.029723  0.170966  0.094419  0.067113  0.001408  0.010601     0.035760  0.011246  0.340094  1.000000  0.025476 -0.007330
+active       0.003755 -0.009927  0.005866 -0.006570 -0.016867 -0.000033  0.004780     0.009911 -0.006770  0.025858  0.025476  1.000000 -0.035653
+cardio       0.003799  0.238159  0.008109 -0.010821  0.181660  0.054475  0.065719     0.221147  0.089307 -0.015486 -0.007330 -0.035653  1.000000
+
+9) CHI-SQUARE TESTS (CATEGORICAL vs TARGET)
+- gender: chi2=4.570, p=3.255e-02, dof=1
+- cholesterol: chi2=3423.439, p=0.000e+00, dof=2
+- gluc: chi2=586.912, p=3.579e-128, dof=2
+- smoke: chi2=16.678, p=4.429e-05, dof=1
+- alco: chi2=3.697, p=5.453e-02, dof=1
+- active: chi2=88.801, p=4.365e-21, dof=1
+
+10) MUTUAL INFORMATION RANKING (ALL FEATURES vs TARGET)
+- ap_hi: MI=0.11678
+- ap_lo: MI=0.07204
+- age: MI=0.02940
+- cholesterol: MI=0.02535
+- weight: MI=0.01720
+- gluc: MI=0.00422
+- active: MI=0.00064
+- height: MI=0.00034
+- smoke: MI=0.00012
+- id: MI=0.00008
+- gender: MI=0.00003
+- alco: MI=0.00003
+
+11) KS-TESTS BETWEEN TARGET CLASSES (CONTINUOUS FEATURES)
+- ap_hi: KS=0.4277, p=0.000e+00
+- ap_lo: KS=0.3232, p=0.000e+00
+- age: KS=0.1954, p=0.000e+00
+- cholesterol: KS=0.1784, p=0.000e+00
+- weight: KS=0.1537, p=0.000e+00
+- gluc: KS=0.0650, p=1.249e-64
+- active: KS=0.0283, p=1.255e-12
+- height: KS=0.0168, p=9.827e-05
+- smoke: KS=0.0088, p=1.338e-01
+- id: KS=0.0079, p=2.255e-01
+- gender: KS=0.0077, p=2.448e-01
+- alco: KS=0.0033, p=9.906e-01
+
+12) SIMPLE DRIFT PROXIES (TRAIN/TEST SPLIT SHAPE CHECK)
+
