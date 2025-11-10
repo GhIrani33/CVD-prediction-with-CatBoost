@@ -44,7 +44,7 @@ pip install -r requirements.txt
 python src/train_final_catboost.py --input dataset/cardio_clean.csv --output models/
 
 # Predict
-python src/predict_universal.py --model models/catboost_model.cbm --scaler models/scaler.pkl --input data.csv
+python src/predict_example.py --model models/catboost_model.cbm --scaler models/scaler.pkl --input data.csv
 ```
 
 ## Model Comparison
@@ -61,7 +61,7 @@ python src/predict_universal.py --model models/catboost_model.cbm --scaler model
 ├── dataset/cardio_clean.csv       # 69,912 samples
 ├── src/                           # Training & prediction scripts
 ├── models/                        # Trained CatBoost model
-└── figures/                       # Publication-ready visualizations
+└── figures/                       # visualizations
 ```
 
 ## Key Features
