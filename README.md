@@ -47,11 +47,11 @@ python src/predict_example.py --model models/catboost_model.cbm --scaler models/
 
 ## Model Comparison
 
-| Model | AUC | Accuracy | Training Time |
-|-------|-----|----------|---------------|
-| **CatBoost** | **0.7991** | **73.3%** | 8 min |
-| LightGBM | 0.7989 | 73.4% | 5 min |
-| XGBoost | 0.7987 | 73.3% | 6 min |
+| Model | AUC | Accuracy |
+|-------|-----|----------|
+| **CatBoost** | **0.7991** | **73.3%** |
+| LightGBM | 0.7989 | 73.4% |
+| XGBoost | 0.7987 | 73.3% |
 
 ## Repository Structure
 
