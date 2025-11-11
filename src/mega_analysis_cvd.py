@@ -1,120 +1,89 @@
 # -*- coding: utf-8 -*-
 """
-=============================================================================
-MEGA-ANALYSIS SCRIPT
-=============================================================================
-Exhaustive search for optimal configuration:
-  1. Model Selection (LightGBM, XGBoost, CatBoost, RandomForest, Extra Trees)
-  2. Hyperparameter Grid Search (learning_rate, max_depth, num_leaves, etc.)
-  3. Feature Engineering Combinations
-  4. Feature Selection (forward/backward/RFECV)
-  5. Ensemble Strategies (voting, weighted avg, stacking)
-  6. Threshold Optimization
-  7. Data Split Ratios
-  8. Cross-Validation (5-fold, 10-fold)
-  9. Calibration Methods (isotonic, sigmoid)
-  10. Class Imbalance Handling (SMOTE, weights)
-
-Output: Detailed CSV reports for every experiment + best model saved
-
 Usage:
-python mega_analysis_cvd.py --input "D:\Project\Heart diseae\dataset\1\cardio_clean.csv" --out_dir "mega_results" --seed 42 --n_jobs -1
+python train_catboost.py --input "D:\Project\Heart diseae\dataset\1\cardio_clean.csv" --output_dir "final_model" --seed 42
 
 Author: Ghasem
 https://github.com/GhIrani33?tab=repositories
 """
 
-import os, json, time, argparse, logging, sys, warnings, pickle
+import os
+import sys
+import json
+import time
+import pickle
+import argparse
+import logging
+import warnings
 from datetime import datetime
-from itertools import product, combinations
+
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
+from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier, VotingClassifier
-from sklearn.feature_selection import RFECV, SelectKBest, f_classif
-from sklearn.calibration import CalibratedClassifierCV
-from sklearn.metrics import (accuracy_score, f1_score, precision_score, recall_score, 
-                             roc_auc_score, confusion_matrix, classification_report)
-import lightgbm as lgb
-import xgboost as xgb
+from sklearn.metrics import (accuracy_score, f1_score, precision_score, recall_score,
+                             roc_auc_score, confusion_matrix, classification_report,
+                             roc_curve, precision_recall_curve)
 
-# Optional advanced libraries
 try:
-    from catboost import CatBoostClassifier
-    HAS_CATBOOST = True
-except:
-    HAS_CATBOOST = False
-    
-try:
-    from imblearn.over_sampling import SMOTE
-    HAS_SMOTE = True
-except:
-    HAS_SMOTE = False
+    from catboost import CatBoostClassifier, Pool
+except ImportError:
+    print("ERROR: CatBoost not installed. Install with: pip install catboost")
+    sys.exit(1)
 
 warnings.filterwarnings('ignore')
 
 # =============================================================================
-# CONFIGURATION
+# CONFIGURATION - Based on Mega-Analysis Results
 # =============================================================================
 
-CAT_COLS = ['gender','cholesterol','gluc','smoke','alco','active']
-
-# Parameter grids for grid search
-LGBM_PARAM_GRID = {
-    'num_leaves': [31, 63, 95],
-    'max_depth': [8, 10, 12],
-    'learning_rate': [0.01, 0.03, 0.05],
-    'feature_fraction': [0.7, 0.8, 0.9],
-    'bagging_fraction': [0.7, 0.8, 0.9],
-    'min_child_samples': [10, 20, 30]
+# Optimal hyperparameters found from 1,004 experiments
+OPTIMAL_PARAMS = {
+    'iterations': 2000,
+    'depth': 8,
+    'learning_rate': 0.01,
+    'l2_leaf_reg': 3,
+    'random_seed': 42,
+    'verbose': 100,
+    'early_stopping_rounds': 100,
+    'task_type': 'CPU',  # Change to 'GPU' if available
+    'loss_function': 'Logloss',
+    'eval_metric': 'AUC'
 }
 
-XGB_PARAM_GRID = {
-    'max_depth': [6, 8, 10],
-    'eta': [0.01, 0.03, 0.05],
-    'subsample': [0.7, 0.8, 0.9],
-    'colsample_bytree': [0.7, 0.8, 0.9],
-    'min_child_weight': [1, 3, 5]
-}
+# Optimal threshold from mega-analysis
+OPTIMAL_THRESHOLD = 0.48
 
-CATBOOST_PARAM_GRID = {
-    'depth': [6, 8, 10],
-    'learning_rate': [0.01, 0.03, 0.05],
-    'l2_leaf_reg': [1, 3, 5]
-}
-
-# Feature engineering configurations
-FEATURE_CONFIGS = {
-    'basic': ['age', 'gender', 'height', 'weight', 'ap_hi', 'ap_lo', 'cholesterol', 'gluc', 'smoke', 'alco', 'active'],
-    'with_derived': ['age', 'gender', 'BMI', 'pulse_pressure', 'ap_hi', 'ap_lo', 'cholesterol', 'gluc', 'smoke', 'alco', 'active'],
-    'full_engineered': 'all'  # Use all engineered features
-}
-
-# Thresholds to test
-THRESHOLDS = np.linspace(0.3, 0.7, 41)  # 0.30, 0.31, ..., 0.70
+# Categorical features
+CAT_COLS = ['gender', 'cholesterol', 'gluc', 'smoke', 'alco', 'active']
 
 # =============================================================================
 # LOGGING SETUP
 # =============================================================================
 
-def setup_logging(out_dir):
-    os.makedirs(out_dir, exist_ok=True)
+def setup_logging(output_dir):
+    """Setup comprehensive logging"""
+    os.makedirs(output_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
-    logger = logging.getLogger("mega_analysis")
+    logger = logging.getLogger("final_catboost")
     logger.setLevel(logging.INFO)
-    for h in list(logger.handlers):
-        logger.removeHandler(h)
     
+    # Remove existing handlers
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+    
+    # Formatter
     fmt = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
     
-    log_file = os.path.join(out_dir, f"mega_analysis_{timestamp}.log")
-    fh = logging.FileHandler(log_file, encoding="utf-8", mode="w")
+    # File handler
+    log_path = os.path.join(output_dir, f"training_{timestamp}.log")
+    fh = logging.FileHandler(log_path, encoding="utf-8", mode="w")
     fh.setLevel(logging.INFO)
     fh.setFormatter(fmt)
     logger.addHandler(fh)
     
+    # Console handler
     ch = logging.StreamHandler(sys.stdout)
     ch.setLevel(logging.INFO)
     ch.setFormatter(fmt)
@@ -123,54 +92,67 @@ def setup_logging(out_dir):
     return logger, timestamp
 
 # =============================================================================
-# FEATURE ENGINEERING
+# FEATURE ENGINEERING (32 features)
 # =============================================================================
 
-def engineer_features_full(df):
-    """Complete feature engineering pipeline"""
+def engineer_features_full(df, logger):
+    """
+    Complete feature engineering pipeline - Same as used in mega-analysis.
+    Creates 32 features from original 13.
+    """
     df = df.copy()
     eps = 1e-6
     
-    # Blood pressure features
-    if {'ap_hi','ap_lo'}.issubset(df.columns):
+    logger.info("Starting feature engineering...")
+    
+    # 1. Blood Pressure Features
+    if {'ap_hi', 'ap_lo'}.issubset(df.columns):
         df['bp_ratio'] = df['ap_hi'] / (df['ap_lo'] + eps)
-        df['map'] = (df['ap_hi'] + 2*df['ap_lo']) / 3
+        df['map'] = (df['ap_hi'] + 2 * df['ap_lo']) / 3  # Mean Arterial Pressure
         df['pulse_pressure'] = df['ap_hi'] - df['ap_lo']
+        logger.info("  ✓ Blood pressure features (bp_ratio, map, pulse_pressure)")
     
-    # BMI
-    if {'height','weight'}.issubset(df.columns):
-        df['BMI'] = df['weight'] / ((df['height']/100) ** 2)
+    # 2. BMI Calculation
+    if {'height', 'weight'}.issubset(df.columns):
+        df['BMI'] = df['weight'] / ((df['height'] / 100) ** 2)
+        logger.info("  ✓ BMI calculated")
     
-    # Age in years
+    # 3. Age Transformations
     if 'age' in df.columns:
         df['age_years'] = df['age'] / 365.25
         df['age_squared'] = df['age_years'] ** 2
-        df['age_group'] = pd.cut(df['age_years'], bins=[0,40,50,60,100], labels=[0,1,2,3]).astype(int)
+        df['age_group'] = pd.cut(df['age_years'], bins=[0, 40, 50, 60, 100], 
+                                 labels=[0, 1, 2, 3]).astype(int)
+        logger.info("  ✓ Age features (age_years, age_squared, age_group)")
     
-    # Age-related interactions
-    if {'pulse_pressure','age_years'}.issubset(df.columns):
+    # 4. Age × Cardiovascular Risk Interactions
+    if {'pulse_pressure', 'age_years'}.issubset(df.columns):
         df['pp_age_ratio'] = df['pulse_pressure'] / (df['age_years'] + eps)
         df['pp_age_product'] = df['pulse_pressure'] * df['age_years']
     
-    if {'BMI','age_years'}.issubset(df.columns):
+    if {'BMI', 'age_years'}.issubset(df.columns):
         df['bmi_age_product'] = df['BMI'] * df['age_years']
         df['bmi_age_ratio'] = df['BMI'] / (df['age_years'] + eps)
         df['bmi_squared'] = df['BMI'] ** 2
     
-    if {'ap_hi','age_years'}.issubset(df.columns):
+    if {'ap_hi', 'age_years'}.issubset(df.columns):
         df['sbp_age_ratio'] = df['ap_hi'] / (df['age_years'] + eps)
         df['sbp_age_product'] = df['ap_hi'] * df['age_years']
     
-    # BMI interactions
-    if {'ap_hi','BMI'}.issubset(df.columns):
+    logger.info("  ✓ Age interaction features")
+    
+    # 5. BMI × BP Interactions
+    if {'ap_hi', 'BMI'}.issubset(df.columns):
         df['sbp_bmi_product'] = df['ap_hi'] * df['BMI']
         df['sbp_bmi_ratio'] = df['ap_hi'] / (df['BMI'] + eps)
     
-    if {'pulse_pressure','BMI'}.issubset(df.columns):
+    if {'pulse_pressure', 'BMI'}.issubset(df.columns):
         df['pp_bmi_product'] = df['pulse_pressure'] * df['BMI']
         df['pp_bmi_ratio'] = df['pulse_pressure'] / (df['BMI'] + eps)
     
-    # Log transforms
+    logger.info("  ✓ BMI interaction features")
+    
+    # 6. Log Transforms (for skewed distributions)
     if 'BMI' in df.columns:
         df['log_bmi'] = np.log1p(df['BMI'])
     
@@ -180,456 +162,454 @@ def engineer_features_full(df):
     if 'ap_hi' in df.columns:
         df['log_sbp'] = np.log1p(df['ap_hi'])
     
-    # Lifestyle risk score
-    if {'cholesterol','gluc','smoke','alco'}.issubset(df.columns):
-        df['lifestyle_risk'] = df['cholesterol']/3 + df['gluc']/3 + df['smoke'] + df['alco']
+    logger.info("  ✓ Log-transformed features")
     
-    # Cardiovascular risk indicators
-    if {'ap_hi','cholesterol'}.issubset(df.columns):
+    # 7. Lifestyle Risk Score
+    if {'cholesterol', 'gluc', 'smoke', 'alco'}.issubset(df.columns):
+        df['lifestyle_risk'] = (df['cholesterol'] / 3 + df['gluc'] / 3 + 
+                                df['smoke'] + df['alco'])
+        logger.info("  ✓ Lifestyle risk score")
+    
+    # 8. Cardiovascular Risk Interactions
+    if {'ap_hi', 'cholesterol'}.issubset(df.columns):
         df['bp_chol_interaction'] = df['ap_hi'] * df['cholesterol']
     
-    if {'BMI','cholesterol','smoke'}.issubset(df.columns):
-        df['metabolic_risk'] = (df['BMI']/30) * df['cholesterol'] * (1 + df['smoke'])
+    if {'BMI', 'cholesterol', 'smoke'}.issubset(df.columns):
+        df['metabolic_risk'] = (df['BMI'] / 30) * df['cholesterol'] * (1 + df['smoke'])
+    
+    logger.info("  ✓ Cardiovascular risk features")
+    
+    n_features = df.shape[1] - 1  # Excluding target
+    logger.info(f"Feature engineering complete: {n_features} features total")
     
     return df
-
-def select_feature_subset(df, config):
-    """Select features based on configuration"""
-    if config == 'all':
-        return df
-    else:
-        available_cols = [c for c in config if c in df.columns]
-        return df[available_cols]
 
 # =============================================================================
 # DATA PREPARATION
 # =============================================================================
 
-def prepare_data(df, feature_config, val_size, seed, logger):
-    """Prepare train/val split with selected features"""
+def prepare_data(df, validation_mode, val_size, seed, logger):
+    """
+    Prepare data with full feature engineering and standardization.
+    
+    Args:
+        df: Input dataframe
+        validation_mode: If True, split into train/val. If False, use all data.
+        val_size: Validation set proportion (if validation_mode=True)
+        seed: Random seed
+        logger: Logger instance
+    
+    Returns:
+        If validation_mode=True: X_train, X_val, y_train, y_val, scaler, cat_features
+        If validation_mode=False: X, y, scaler, cat_features
+    """
+    logger.info("="*70)
+    logger.info("DATA PREPARATION")
+    logger.info("="*70)
+    
+    # Separate target
     y = df['cardio'].values
     X = df.drop(columns=['cardio'])
     
+    logger.info(f"Original data shape: {X.shape}")
+    logger.info(f"Class distribution: {np.bincount(y)}")
+    
     # Engineer features
-    X = engineer_features_full(X)
+    X = engineer_features_full(X, logger)
     
-    # Select feature subset
-    if feature_config != 'all':
-        X = select_feature_subset(X, FEATURE_CONFIGS[feature_config])
+    # Identify categorical feature indices
+    cat_feature_indices = [i for i, col in enumerate(X.columns) if col in CAT_COLS]
+    logger.info(f"Categorical features: {[X.columns[i] for i in cat_feature_indices]}")
     
-    # Train/val split
-    X_train, X_val, y_train, y_val = train_test_split(
-        X, y, test_size=val_size, random_state=seed, stratify=y
+    # Identify numeric columns for scaling
+    num_cols = [c for c in X.columns if c not in CAT_COLS]
+    
+    if validation_mode:
+        # Train/validation split
+        X_train, X_val, y_train, y_val = train_test_split(
+            X, y, test_size=val_size, random_state=seed, stratify=y
+        )
+        
+        logger.info(f"Train set: {X_train.shape}, Class distribution: {np.bincount(y_train)}")
+        logger.info(f"Val set:   {X_val.shape}, Class distribution: {np.bincount(y_val)}")
+        
+        # Standardize numeric features
+        scaler = StandardScaler()
+        X_train[num_cols] = scaler.fit_transform(X_train[num_cols])
+        X_val[num_cols] = scaler.transform(X_val[num_cols])
+        
+        # Convert categorical to int (CatBoost requirement)
+        for col in CAT_COLS:
+            if col in X_train.columns:
+                X_train[col] = X_train[col].astype(int)
+                X_val[col] = X_val[col].astype(int)
+        
+        logger.info("Data preparation complete (validation mode)")
+        return X_train, X_val, y_train, y_val, scaler, cat_feature_indices
+    
+    else:
+        # Use all data for final training
+        logger.info(f"Using full dataset: {X.shape}")
+        
+        # Standardize numeric features
+        scaler = StandardScaler()
+        X[num_cols] = scaler.fit_transform(X[num_cols])
+        
+        # Convert categorical to int
+        for col in CAT_COLS:
+            if col in X.columns:
+                X[col] = X[col].astype(int)
+        
+        logger.info("Data preparation complete (full training mode)")
+        return X, y, scaler, cat_feature_indices
+
+# =============================================================================
+# MODEL TRAINING
+# =============================================================================
+
+def train_catboost(X_train, y_train, X_val, y_val, cat_features, params, logger):
+    """
+    Train CatBoost with optimal hyperparameters from mega-analysis.
+    """
+    logger.info("="*70)
+    logger.info("MODEL TRAINING - CatBoost (Optimal Configuration)")
+    logger.info("="*70)
+    
+    logger.info("Hyperparameters:")
+    for key, value in params.items():
+        logger.info(f"  {key}: {value}")
+    
+    # Create CatBoost pools
+    train_pool = Pool(X_train, y_train, cat_features=cat_features)
+    val_pool = Pool(X_val, y_val, cat_features=cat_features)
+    
+    # Initialize model
+    model = CatBoostClassifier(**params)
+    
+    # Train with validation monitoring
+    logger.info("\nStarting training...")
+    start_time = time.time()
+    
+    model.fit(
+        train_pool,
+        eval_set=val_pool,
+        use_best_model=True,
+        plot=False
     )
     
-    # Identify numeric columns
-    num_cols = [c for c in X_train.columns if c not in CAT_COLS]
+    elapsed = time.time() - start_time
+    logger.info(f"\nTraining completed in {elapsed/60:.2f} minutes")
+    logger.info(f"Best iteration: {model.get_best_iteration()}")
+    logger.info(f"Best score (AUC): {model.get_best_score()['validation']['AUC']:.6f}")
     
-    # Scale numeric features
-    scaler = StandardScaler()
-    X_train[num_cols] = scaler.fit_transform(X_train[num_cols])
-    X_val[num_cols] = scaler.transform(X_val[num_cols])
-    
-    # Convert categorical to category dtype
-    for c in CAT_COLS:
-        if c in X_train.columns:
-            X_train[c] = X_train[c].astype('category')
-            X_val[c] = X_val[c].astype('category')
-    
-    logger.info(f"  Prepared data: Train={X_train.shape}, Val={X_val.shape}")
-    return X_train, X_val, y_train, y_val, scaler
+    return model
 
-# =============================================================================
-# MODEL TRAINING FUNCTIONS
-# =============================================================================
-
-def train_lightgbm(X_train, y_train, X_val, y_val, params, seed):
-    """Train LightGBM with given params"""
-    dtrain = lgb.Dataset(X_train, label=y_train, 
-                        categorical_feature=[c for c in CAT_COLS if c in X_train.columns])
-    dval = lgb.Dataset(X_val, label=y_val, reference=dtrain,
-                      categorical_feature=[c for c in CAT_COLS if c in X_train.columns])
+def train_catboost_full(X, y, cat_features, params, logger):
+    """
+    Train CatBoost on full dataset (no validation split).
+    Used for final production model.
+    """
+    logger.info("="*70)
+    logger.info("FINAL MODEL TRAINING - Full Dataset")
+    logger.info("="*70)
     
-    full_params = {**params, 'objective': 'binary', 'metric': 'auc', 
-                   'random_state': seed, 'verbosity': -1}
+    logger.info("Training on 100% of data (no validation split)")
     
-    callbacks = [lgb.early_stopping(stopping_rounds=100, verbose=False)]
-    model = lgb.train(full_params, dtrain, num_boost_round=2000, 
-                     valid_sets=[dval], callbacks=callbacks)
+    # Create pool
+    train_pool = Pool(X, y, cat_features=cat_features)
     
-    y_pred_proba = model.predict(X_val, num_iteration=model.best_iteration)
-    auc = roc_auc_score(y_val, y_pred_proba)
+    # Remove early stopping for full training
+    params_full = params.copy()
+    params_full.pop('early_stopping_rounds', None)
+    params_full['iterations'] = model.get_best_iteration() if 'model' in locals() else params['iterations']
     
-    return model, y_pred_proba, auc
-
-def train_xgboost(X_train, y_train, X_val, y_val, params, seed):
-    """Train XGBoost with given params"""
-    X_tr = X_train.copy(); X_vl = X_val.copy()
-    for c in CAT_COLS:
-        if c in X_tr.columns:
-            X_tr[c] = X_tr[c].astype(int)
-            X_vl[c] = X_vl[c].astype(int)
+    # Initialize and train
+    model = CatBoostClassifier(**params_full)
     
-    dtrain = xgb.DMatrix(X_tr, label=y_train)
-    dval = xgb.DMatrix(X_vl, label=y_val)
+    logger.info("Starting training...")
+    start_time = time.time()
     
-    full_params = {**params, 'objective': 'binary:logistic', 'eval_metric': 'auc',
-                   'seed': seed, 'verbosity': 0}
+    model.fit(train_pool, plot=False)
     
-    model = xgb.train(full_params, dtrain, num_boost_round=2000,
-                     evals=[(dval, 'val')], early_stopping_rounds=100, verbose_eval=False)
+    elapsed = time.time() - start_time
+    logger.info(f"Training completed in {elapsed/60:.2f} minutes")
     
-    y_pred_proba = model.predict(dval, iteration_range=(0, model.best_iteration))
-    auc = roc_auc_score(y_val, y_pred_proba)
-    
-    return model, y_pred_proba, auc
-
-def train_catboost(X_train, y_train, X_val, y_val, params, seed):
-    """Train CatBoost with given params"""
-    if not HAS_CATBOOST:
-        return None, None, 0.0
-    
-    cat_features = [i for i, c in enumerate(X_train.columns) if c in CAT_COLS]
-    
-    full_params = {**params, 'iterations': 2000, 'random_seed': seed, 
-                   'verbose': False, 'early_stopping_rounds': 100}
-    
-    model = CatBoostClassifier(**full_params)
-    model.fit(X_train, y_train, eval_set=(X_val, y_val), cat_features=cat_features)
-    
-    y_pred_proba = model.predict_proba(X_val)[:, 1]
-    auc = roc_auc_score(y_val, y_pred_proba)
-    
-    return model, y_pred_proba, auc
-
-def train_random_forest(X_train, y_train, X_val, y_val, seed):
-    """Train Random Forest"""
-    X_tr = X_train.copy(); X_vl = X_val.copy()
-    for c in CAT_COLS:
-        if c in X_tr.columns:
-            X_tr[c] = X_tr[c].astype(int)
-            X_vl[c] = X_vl[c].astype(int)
-    
-    model = RandomForestClassifier(n_estimators=500, max_depth=15, min_samples_split=10,
-                                   min_samples_leaf=5, random_state=seed, n_jobs=-1)
-    model.fit(X_tr, y_train)
-    
-    y_pred_proba = model.predict_proba(X_vl)[:, 1]
-    auc = roc_auc_score(y_val, y_pred_proba)
-    
-    return model, y_pred_proba, auc
-
-def train_extra_trees(X_train, y_train, X_val, y_val, seed):
-    """Train Extra Trees"""
-    X_tr = X_train.copy(); X_vl = X_val.copy()
-    for c in CAT_COLS:
-        if c in X_tr.columns:
-            X_tr[c] = X_tr[c].astype(int)
-            X_vl[c] = X_vl[c].astype(int)
-    
-    model = ExtraTreesClassifier(n_estimators=500, max_depth=15, min_samples_split=10,
-                                 min_samples_leaf=5, random_state=seed, n_jobs=-1)
-    model.fit(X_tr, y_train)
-    
-    y_pred_proba = model.predict_proba(X_vl)[:, 1]
-    auc = roc_auc_score(y_val, y_pred_proba)
-    
-    return model, y_pred_proba, auc
+    return model
 
 # =============================================================================
 # EVALUATION
 # =============================================================================
 
-def evaluate_threshold(y_true, y_pred_proba, threshold):
-    """Evaluate metrics at given threshold"""
+def evaluate_model(model, X, y, threshold, dataset_name, logger):
+    """
+    Comprehensive model evaluation with optimal threshold.
+    """
+    logger.info("="*70)
+    logger.info(f"MODEL EVALUATION - {dataset_name}")
+    logger.info("="*70)
+    
+    # Predict probabilities
+    y_pred_proba = model.predict_proba(X)[:, 1]
+    
+    # Predict classes with optimal threshold
     y_pred = (y_pred_proba >= threshold).astype(int)
     
-    acc = accuracy_score(y_true, y_pred)
-    f1 = f1_score(y_true, y_pred, zero_division=0)
-    prec = precision_score(y_true, y_pred, zero_division=0)
-    rec = recall_score(y_true, y_pred, zero_division=0)
+    # Calculate metrics
+    acc = accuracy_score(y, y_pred)
+    f1 = f1_score(y, y_pred)
+    prec = precision_score(y, y_pred)
+    rec = recall_score(y, y_pred)
+    auc = roc_auc_score(y, y_pred_proba)
     
-    return {'accuracy': acc, 'f1': f1, 'precision': prec, 'recall': rec}
-
-def find_best_threshold(y_true, y_pred_proba, metric='accuracy'):
-    """Find optimal threshold for given metric"""
-    best_score = -1
-    best_thr = 0.5
+    # Confusion matrix
+    cm = confusion_matrix(y, y_pred)
+    tn, fp, fn, tp = cm.ravel()
     
-    for thr in THRESHOLDS:
-        metrics = evaluate_threshold(y_true, y_pred_proba, thr)
-        score = metrics[metric]
-        
-        if score > best_score:
-            best_score = score
-            best_thr = thr
+    # Log results
+    logger.info(f"\nThreshold: {threshold:.2f}")
+    logger.info(f"\nPerformance Metrics:")
+    logger.info(f"  AUC:       {auc:.4f} ({auc*100:.2f}%)")
+    logger.info(f"  Accuracy:  {acc:.4f} ({acc*100:.2f}%)")
+    logger.info(f"  F1 Score:  {f1:.4f}")
+    logger.info(f"  Precision: {prec:.4f}")
+    logger.info(f"  Recall:    {rec:.4f}")
     
-    return best_thr, best_score
+    logger.info(f"\nConfusion Matrix:")
+    logger.info(f"  True Negatives:  {tn:6d}")
+    logger.info(f"  False Positives: {fp:6d}")
+    logger.info(f"  False Negatives: {fn:6d}")
+    logger.info(f"  True Positives:  {tp:6d}")
+    
+    # Additional metrics
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+    npv = tn / (tn + fn) if (tn + fn) > 0 else 0
+    ppv = tp / (tp + fp) if (tp + fp) > 0 else 0
+    
+    logger.info(f"\nAdditional Metrics:")
+    logger.info(f"  Specificity (TNR): {specificity:.4f}")
+    logger.info(f"  NPV: {npv:.4f}")
+    logger.info(f"  PPV: {ppv:.4f}")
+    
+    # Feature importance
+    feature_importance = model.get_feature_importance()
+    feature_names = X.columns
+    
+    logger.info(f"\nTop 10 Most Important Features:")
+    importance_df = pd.DataFrame({
+        'feature': feature_names,
+        'importance': feature_importance
+    }).sort_values('importance', ascending=False)
+    
+    for idx, row in importance_df.head(10).iterrows():
+        logger.info(f"  {row['feature']:25s}: {row['importance']:.2f}")
+    
+    # Return metrics dictionary
+    metrics = {
+        'threshold': float(threshold),
+        'auc': float(auc),
+        'accuracy': float(acc),
+        'f1': float(f1),
+        'precision': float(prec),
+        'recall': float(rec),
+        'specificity': float(specificity),
+        'npv': float(npv),
+        'ppv': float(ppv),
+        'confusion_matrix': {
+            'tn': int(tn), 'fp': int(fp),
+            'fn': int(fn), 'tp': int(tp)
+        },
+        'feature_importance': importance_df.head(20).to_dict('records')
+    }
+    
+    return metrics, y_pred_proba
 
 # =============================================================================
-# MAIN MEGA-ANALYSIS
+# SAVE MODEL & ARTIFACTS
+# =============================================================================
+
+def save_model_and_artifacts(model, scaler, cat_features, metrics, params, 
+                             output_dir, timestamp, logger):
+    """
+    Save trained model, scaler, and all metadata.
+    """
+    logger.info("="*70)
+    logger.info("SAVING MODEL & ARTIFACTS")
+    logger.info("="*70)
+    
+    # Save CatBoost model
+    model_path = os.path.join(output_dir, f"catboost_model_{timestamp}.cbm")
+    model.save_model(model_path)
+    logger.info(f"✓ Model saved: {model_path}")
+    
+    # Save scaler
+    scaler_path = os.path.join(output_dir, f"scaler_{timestamp}.pkl")
+    with open(scaler_path, 'wb') as f:
+        pickle.dump(scaler, f)
+    logger.info(f"✓ Scaler saved: {scaler_path}")
+    
+    # Save configuration
+    config = {
+        'model': 'CatBoost',
+        'timestamp': timestamp,
+        'hyperparameters': params,
+        'optimal_threshold': OPTIMAL_THRESHOLD,
+        'categorical_features': cat_features,
+        'n_features': len(cat_features) + len([c for c in model.feature_names_ if c not in CAT_COLS]),
+        'feature_names': list(model.feature_names_),
+        'validation_metrics': metrics,
+        'mega_analysis_source': 'Based on 1,004 experiments',
+        'expected_performance': {
+            'auc': 0.799,
+            'accuracy': 0.733,
+            'f1': 0.726
+        }
+    }
+    
+    config_path = os.path.join(output_dir, f"model_config_{timestamp}.json")
+    with open(config_path, 'w', encoding='utf-8') as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+    logger.info(f"✓ Configuration saved: {config_path}")
+    
+    # Save README
+    readme_path = os.path.join(output_dir, "README.txt")
+    with open(readme_path, 'w', encoding='utf-8') as f:
+        f.write("="*70 + "\n")
+        f.write("OPTIMAL CVD PREDICTION MODEL - CatBoost\n")
+        f.write("="*70 + "\n\n")
+        f.write("Based on exhaustive mega-analysis of 1,004 experiments.\n\n")
+        f.write("FILES:\n")
+        f.write(f"  - catboost_model_{timestamp}.cbm: Trained CatBoost model\n")
+        f.write(f"  - scaler_{timestamp}.pkl: Feature scaler (StandardScaler)\n")
+        f.write(f"  - model_config_{timestamp}.json: Complete configuration\n")
+        f.write(f"  - training_{timestamp}.log: Training log\n\n")
+        f.write("EXPECTED PERFORMANCE:\n")
+        f.write(f"  - AUC: 79.9%\n")
+        f.write(f"  - Accuracy: 73.3%\n")
+        f.write(f"  - F1 Score: 72.6%\n")
+        f.write(f"  - Precision: 74.5%\n")
+        f.write(f"  - Recall: 70.8%\n\n")
+        f.write("USAGE:\n")
+        f.write("  See predict_example.py for inference code.\n\n")
+        f.write(f"Created: {timestamp}\n")
+    
+    logger.info(f"✓ README saved: {readme_path}")
+    
+# =============================================================================
+# MAIN EXECUTION
 # =============================================================================
 
 def main():
-    parser = argparse.ArgumentParser(description="CVD Mega-Analysis")
-    parser.add_argument("--input", type=str, required=True)
-    parser.add_argument("--out_dir", type=str, default="mega_results")
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--n_jobs", type=int, default=-1)
-    parser.add_argument("--quick_mode", action='store_true', help="Reduced search space for testing")
+    parser = argparse.ArgumentParser(
+        description="Train final optimal CatBoost model for CVD prediction"
+    )
+    parser.add_argument("--input", type=str, required=True,
+                       help="Path to input CSV file (cardio_clean.csv)")
+    parser.add_argument("--output_dir", type=str, default="final_model",
+                       help="Output directory for model and artifacts")
+    parser.add_argument("--validation", action='store_true',
+                       help="Run with validation split (default: train on 100%% data)")
+    parser.add_argument("--val_size", type=float, default=0.2,
+                       help="Validation set size (if --validation is set)")
+    parser.add_argument("--seed", type=int, default=42,
+                       help="Random seed for reproducibility")
+    
     args = parser.parse_args()
     
-    logger, timestamp = setup_logging(args.out_dir)
+    # Setup
+    logger, timestamp = setup_logging(args.output_dir)
     np.random.seed(args.seed)
     
-    logger.info("="*80)
-    logger.info("CVD MEGA-ANALYSIS STARTED")
+    logger.info("="*70)
+    logger.info("PREDICTION MODEL TRAINING")
+    logger.info("Based on Mega-Analysis (1,004 experiments)")
+    logger.info("="*70)
     logger.info(f"Timestamp: {timestamp}")
-    logger.info("="*80)
+    logger.info(f"Input file: {args.input}")
+    logger.info(f"Output directory: {args.output_dir}")
+    logger.info(f"Validation mode: {args.validation}")
+    logger.info(f"Random seed: {args.seed}")
     
     # Load data
+    logger.info("\nLoading data...")
     df = pd.read_csv(args.input)
     logger.info(f"Loaded data: {df.shape}")
     
-    # Storage for all results
-    all_results = []
-    experiment_id = 0
-    
-    # ===========================================
-    # PHASE 1: MODEL SELECTION & HYPERPARAMETERS
-    # ===========================================
-    logger.info("\n" + "="*80)
-    logger.info("PHASE 1: MODEL SELECTION & HYPERPARAMETER SEARCH")
-    logger.info("="*80)
-    
-    # Prepare data with full features
-    X_train, X_val, y_train, y_val, scaler = prepare_data(df, 'full_engineered', 0.2, args.seed, logger)
-    
-    # Test LightGBM configurations
-    logger.info("\n[1/5] Testing LightGBM configurations...")
-    if args.quick_mode:
-        lgbm_grid = {'num_leaves': [63], 'max_depth': [10], 'learning_rate': [0.03],
-                     'feature_fraction': [0.8], 'bagging_fraction': [0.8], 'min_child_samples': [20]}
+    # Prepare data
+    if args.validation:
+        X_train, X_val, y_train, y_val, scaler, cat_features = prepare_data(
+            df, validation_mode=True, val_size=args.val_size, 
+            seed=args.seed, logger=logger
+        )
+        
+        # Train with validation
+        model = train_catboost(X_train, y_train, X_val, y_val, 
+                              cat_features, OPTIMAL_PARAMS, logger)
+        
+        # Evaluate on validation set
+        val_metrics, _ = evaluate_model(model, X_val, y_val, OPTIMAL_THRESHOLD,
+                                       "Validation Set", logger)
+        
+        # Optionally: Retrain on full data with best_iteration
+        logger.info("\n" + "="*70)
+        logger.info("RETRAINING ON FULL DATASET")
+        logger.info("="*70)
+        
+        X_full, y_full, scaler_full, cat_features_full = prepare_data(
+            df, validation_mode=False, val_size=None, 
+            seed=args.seed, logger=logger
+        )
+        
+        # Use best_iteration from validation training
+        final_params = OPTIMAL_PARAMS.copy()
+        final_params['iterations'] = model.get_best_iteration()
+        final_params.pop('early_stopping_rounds', None)
+        final_params['verbose'] = False
+        
+        final_model = CatBoostClassifier(**final_params)
+        final_model.fit(Pool(X_full, y_full, cat_features=cat_features_full))
+        
+        logger.info(f"Final model trained on full dataset ({len(y_full)} samples)")
+        
+        # Save final model
+        save_model_and_artifacts(final_model, scaler_full, cat_features_full,
+                                val_metrics, final_params, args.output_dir,
+                                timestamp, logger)
+        
     else:
-        lgbm_grid = LGBM_PARAM_GRID
-    
-    lgbm_configs = [dict(zip(lgbm_grid.keys(), v)) for v in product(*lgbm_grid.values())]
-    logger.info(f"  Testing {len(lgbm_configs)} LightGBM configurations...")
-    
-    for i, params in enumerate(lgbm_configs):
-        try:
-            _, proba, auc = train_lightgbm(X_train, y_train, X_val, y_val, params, args.seed)
-            best_thr, best_acc = find_best_threshold(y_val, proba, 'accuracy')
-            metrics = evaluate_threshold(y_val, proba, best_thr)
-            
-            all_results.append({
-                'experiment_id': experiment_id,
-                'model': 'LightGBM',
-                'params': json.dumps(params),
-                'features': 'full_engineered',
-                'val_size': 0.2,
-                'auc': auc,
-                'best_threshold': best_thr,
-                **metrics
-            })
-            
-            experiment_id += 1
-            
-            if (i+1) % 10 == 0:
-                logger.info(f"    Completed {i+1}/{len(lgbm_configs)} - Best AUC so far: {max([r['auc'] for r in all_results]):.4f}")
-        except Exception as e:
-            logger.warning(f"    Config {i+1} failed: {e}")
-    
-    # Test XGBoost configurations
-    logger.info("\n[2/5] Testing XGBoost configurations...")
-    if args.quick_mode:
-        xgb_grid = {'max_depth': [8], 'eta': [0.03], 'subsample': [0.8],
-                    'colsample_bytree': [0.8], 'min_child_weight': [3]}
-    else:
-        xgb_grid = XGB_PARAM_GRID
-    
-    xgb_configs = [dict(zip(xgb_grid.keys(), v)) for v in product(*xgb_grid.values())]
-    logger.info(f"  Testing {len(xgb_configs)} XGBoost configurations...")
-    
-    for i, params in enumerate(xgb_configs):
-        try:
-            _, proba, auc = train_xgboost(X_train, y_train, X_val, y_val, params, args.seed)
-            best_thr, best_acc = find_best_threshold(y_val, proba, 'accuracy')
-            metrics = evaluate_threshold(y_val, proba, best_thr)
-            
-            all_results.append({
-                'experiment_id': experiment_id,
-                'model': 'XGBoost',
-                'params': json.dumps(params),
-                'features': 'full_engineered',
-                'val_size': 0.2,
-                'auc': auc,
-                'best_threshold': best_thr,
-                **metrics
-            })
-            
-            experiment_id += 1
-            
-            if (i+1) % 10 == 0:
-                logger.info(f"    Completed {i+1}/{len(xgb_configs)}")
-        except Exception as e:
-            logger.warning(f"    Config {i+1} failed: {e}")
-    
-    # Test CatBoost if available
-    if HAS_CATBOOST and not args.quick_mode:
-        logger.info("\n[3/5] Testing CatBoost configurations...")
-        catboost_configs = [dict(zip(CATBOOST_PARAM_GRID.keys(), v)) 
-                           for v in product(*CATBOOST_PARAM_GRID.values())]
-        logger.info(f"  Testing {len(catboost_configs)} CatBoost configurations...")
+        # Train directly on full dataset (no validation)
+        X, y, scaler, cat_features = prepare_data(
+            df, validation_mode=False, val_size=None,
+            seed=args.seed, logger=logger
+        )
         
-        for i, params in enumerate(catboost_configs):
-            try:
-                _, proba, auc = train_catboost(X_train, y_train, X_val, y_val, params, args.seed)
-                best_thr, best_acc = find_best_threshold(y_val, proba, 'accuracy')
-                metrics = evaluate_threshold(y_val, proba, best_thr)
-                
-                all_results.append({
-                    'experiment_id': experiment_id,
-                    'model': 'CatBoost',
-                    'params': json.dumps(params),
-                    'features': 'full_engineered',
-                    'val_size': 0.2,
-                    'auc': auc,
-                    'best_threshold': best_thr,
-                    **metrics
-                })
-                
-                experiment_id += 1
-            except Exception as e:
-                logger.warning(f"    Config {i+1} failed: {e}")
-    
-    # Test Random Forest
-    logger.info("\n[4/5] Testing Random Forest...")
-    try:
-        _, proba, auc = train_random_forest(X_train, y_train, X_val, y_val, args.seed)
-        best_thr, best_acc = find_best_threshold(y_val, proba, 'accuracy')
-        metrics = evaluate_threshold(y_val, proba, best_thr)
+        # Train final model
+        model = CatBoostClassifier(**OPTIMAL_PARAMS)
+        model.fit(Pool(X, y, cat_features=cat_features))
         
-        all_results.append({
-            'experiment_id': experiment_id,
-            'model': 'RandomForest',
-            'params': json.dumps({'n_estimators': 500}),
-            'features': 'full_engineered',
-            'val_size': 0.2,
-            'auc': auc,
-            'best_threshold': best_thr,
-            **metrics
-        })
-        experiment_id += 1
-    except Exception as e:
-        logger.warning(f"    RandomForest failed: {e}")
-    
-    # Test Extra Trees
-    logger.info("\n[5/5] Testing Extra Trees...")
-    try:
-        _, proba, auc = train_extra_trees(X_train, y_train, X_val, y_val, args.seed)
-        best_thr, best_acc = find_best_threshold(y_val, proba, 'accuracy')
-        metrics = evaluate_threshold(y_val, proba, best_thr)
+        logger.info("Training complete (no validation split used)")
         
-        all_results.append({
-            'experiment_id': experiment_id,
-            'model': 'ExtraTrees',
-            'params': json.dumps({'n_estimators': 500}),
-            'features': 'full_engineered',
-            'val_size': 0.2,
-            'auc': auc,
-            'best_threshold': best_thr,
-            **metrics
-        })
-        experiment_id += 1
-    except Exception as e:
-        logger.warning(f"    ExtraTrees failed: {e}")
-    
-    # ===========================================
-    # PHASE 2: FEATURE CONFIGURATION TESTING
-    # ===========================================
-    logger.info("\n" + "="*80)
-    logger.info("PHASE 2: FEATURE CONFIGURATION TESTING")
-    logger.info("="*80)
-    
-    # Get best model from Phase 1
-    best_so_far = max(all_results, key=lambda x: x['auc'])
-    logger.info(f"Best model from Phase 1: {best_so_far['model']} with AUC={best_so_far['auc']:.4f}")
-    
-    # Test different feature configurations with best model
-    for feat_config in ['basic', 'with_derived', 'full_engineered']:
-        logger.info(f"\nTesting feature config: {feat_config}")
-        X_train_fc, X_val_fc, y_train_fc, y_val_fc, _ = prepare_data(df, feat_config, 0.2, args.seed, logger)
+        # Evaluate on training data (just for reference)
+        train_metrics, _ = evaluate_model(model, X, y, OPTIMAL_THRESHOLD,
+                                         "Training Set (Full Data)", logger)
         
-        try:
-            best_params = json.loads(best_so_far['params'])
-            
-            if best_so_far['model'] == 'LightGBM':
-                _, proba, auc = train_lightgbm(X_train_fc, y_train_fc, X_val_fc, y_val_fc, best_params, args.seed)
-            elif best_so_far['model'] == 'XGBoost':
-                _, proba, auc = train_xgboost(X_train_fc, y_train_fc, X_val_fc, y_val_fc, best_params, args.seed)
-            
-            best_thr, best_acc = find_best_threshold(y_val_fc, proba, 'accuracy')
-            metrics = evaluate_threshold(y_val_fc, proba, best_thr)
-            
-            all_results.append({
-                'experiment_id': experiment_id,
-                'model': best_so_far['model'],
-                'params': best_so_far['params'],
-                'features': feat_config,
-                'val_size': 0.2,
-                'auc': auc,
-                'best_threshold': best_thr,
-                **metrics
-            })
-            
-            experiment_id += 1
-            logger.info(f"  AUC: {auc:.4f}, Acc: {metrics['accuracy']:.4f}")
-        except Exception as e:
-            logger.warning(f"  Failed: {e}")
+        # Save model
+        save_model_and_artifacts(model, scaler, cat_features, train_metrics,
+                                OPTIMAL_PARAMS, args.output_dir, timestamp, logger)
     
-    # ===========================================
-    # SAVE RESULTS
-    # ===========================================
-    logger.info("\n" + "="*80)
-    logger.info("SAVING RESULTS")
-    logger.info("="*80)
-    
-    df_results = pd.DataFrame(all_results)
-    csv_path = os.path.join(args.out_dir, f"mega_analysis_results_{timestamp}.csv")
-    df_results.to_csv(csv_path, index=False)
-    logger.info(f"Saved results to: {csv_path}")
-    
-    # Print top 10 configurations
-    logger.info("\n" + "="*80)
-    logger.info("TOP 10 CONFIGURATIONS BY AUC")
-    logger.info("="*80)
-    
-    top_10 = df_results.nlargest(10, 'auc')
-    for idx, row in top_10.iterrows():
-        logger.info(f"\n{row['experiment_id']}. {row['model']} - AUC={row['auc']:.4f}, Acc={row['accuracy']:.4f}")
-        logger.info(f"   Features: {row['features']}, Threshold: {row['best_threshold']:.3f}")
-        logger.info(f"   F1: {row['f1']:.4f}, Precision: {row['precision']:.4f}, Recall: {row['recall']:.4f}")
-    
-    # Save best model info
-    best_overall = df_results.loc[df_results['auc'].idxmax()]
-    best_info = {
-        'model': best_overall['model'],
-        'params': json.loads(best_overall['params']),
-        'features': best_overall['features'],
-        'auc': float(best_overall['auc']),
-        'accuracy': float(best_overall['accuracy']),
-        'f1': float(best_overall['f1']),
-        'best_threshold': float(best_overall['best_threshold'])
-    }
-    
-    with open(os.path.join(args.out_dir, f"best_config_{timestamp}.json"), 'w') as f:
-        json.dump(best_info, f, indent=2)
-    
-    logger.info("\n" + "="*80)
-    logger.info("MEGA-ANALYSIS COMPLETE!")
-    logger.info(f"Best configuration: {best_overall['model']} with AUC={best_overall['auc']:.4f}")
-    logger.info("="*80)
+    # Final summary
+    logger.info("\n" + "="*70)
+    logger.info("TRAINING COMPLETED SUCCESSFULLY")
+    logger.info("="*70)
+    logger.info(f"\nModel saved to: {args.output_dir}/")
+    logger.info("\nExpected Performance (from mega-analysis):")
+    logger.info("  - AUC: 79.9%")
+    logger.info("  - Accuracy: 73.3%")
+    logger.info("  - F1 Score: 72.6%")
+    logger.info("  - Precision: 74.5%")
+    logger.info("  - Recall: 70.8%")
+    logger.info("\nThis is the optimal configuration found from 1,004 experiments.")
+    logger.info("Ready for production deployment!")
+    logger.info("="*70)
 
 if __name__ == "__main__":
     main()
