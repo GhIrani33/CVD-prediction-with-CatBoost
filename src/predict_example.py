@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Publication-ready inference script for CatBoost CVD model
+inference script for CatBoost CVD model
 - Reproduces full feature engineering (32 features) consistent with training
 - Loads model and scaler robustly (timestamped or plain filenames)
 - Applies scaling to numeric features only
@@ -22,7 +22,7 @@ from catboost import CatBoostClassifier, Pool
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_DIR = BASE_DIR  # adjust if model sits elsewhere
 CONFIG_PATHS = [
-    os.path.join(MODEL_DIR, "model_config.json"),               # final_model/model_config.json
+    os.path.join(MODEL_DIR, "model_config.json"),               # models/model_config.json
     os.path.join(BASE_DIR, "model_config.json"),                # fallback
 ]
 
@@ -220,3 +220,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
