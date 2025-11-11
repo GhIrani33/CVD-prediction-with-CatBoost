@@ -25,13 +25,13 @@ Machine learning model for CVD prediction using CatBoost. Optimized across 1,004
 
 ## Visual Results
 
-### correlation_heatmap
-![correlation heatmap](figures/correlation_heatmap.pngg)
+### Correlation Heatmap
+![correlation heatmap](figures/correlation_heatmap.png)
 
 ### Feature Importance
 ![Feature Importance](figures/feature_importance.png)
 
-### confusion matrix
+### Confusion Matrix
 ![confusion matrix](figures/confusion_matrix.png)
 
 ## Quick Start
