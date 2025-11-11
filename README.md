@@ -21,7 +21,7 @@ Machine learning model for CVD prediction using CatBoost. Optimized across 1,004
 1. **Data Cleaning**: Removed 88 outliers (0.13%)
 2. **Feature Engineering**: 13 → 32 features (BP metrics, BMI interactions, age transformations)
 3. **Model Selection**: Tested 5 algorithms (CatBoost, LightGBM, XGBoost, RandomForest, ExtraTrees)
-4. **Optimization**: 1,004 experiments, optimal threshold = 0.48
+4. **Optimization**: 1,004 experiments, optimal threshold = 0.48, global threshold = 0.50
 
 ## Visual Results
 
